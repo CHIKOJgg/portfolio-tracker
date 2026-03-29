@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-
+import { authMiddleware } from './routes/auth.js';
 const DEV_USER = { id: 99999999, first_name: 'Developer', username: 'devmode' };
 const AUTH_MAX_AGE_SEC = 86400;
 
