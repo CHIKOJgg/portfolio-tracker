@@ -1,8 +1,34 @@
-// .env is loaded by Node.js --env-file flag BEFORE this file runs.
-// No manual parsing needed.
+// In production (Render/Railway), env vars come from the platform UI.
+// In dev, we load .env manually using Node 20+ built-in.
+// --env-file=.env is only used in the "dev" script, not "start".
 
 if (!process.env.DATABASE_URL) {
-  console.error('\n❌  DATABASE_URL is not set in backend/.env\n');
+  // Try loading .env for local dev fallback
+  try {
+    const { readFileSync } = await import('fs');
+    const { join, dirname } = await import('path');
+    const { fileURLToPath } = await import('url');
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const lines = readFileSync(join(__dirname, '../.env'), 'utf8').split(/\r?\n/);
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      const i = line.indexOf('=');
+      if (i < 1) continue;
+      const k = line.slice(0, i).trim();
+      const v = line.slice(i + 1).trim().replace(/^["']|["']$/g, '');
+      if (k && process.env[k] === undefined) process.env[k] = v;
+    }
+    console.log('[env] loaded .env file');
+  } catch {
+    // No .env file — running in production with platform env vars
+  }
+}
+
+if (!process.env.DATABASE_URL) {
+  console.error('\n❌  DATABASE_URL is not set!\n');
+  console.error('    In production: set it in Render Environment Variables');
+  console.error('    In dev: add it to backend/.env\n');
   process.exit(1);
 }
 
@@ -24,8 +50,9 @@ import simulatorRoutes      from './routes/simulator.js';
 const PORT  = parseInt(process.env.PORT || '3001', 10);
 const isDev = process.env.DEV_MODE === 'true';
 
+const maskedDb = process.env.DATABASE_URL.replace(/:([^:@]+)@/, ':***@').slice(0, 70);
 console.log(`[config] DEV_MODE=${isDev}  PORT=${PORT}`);
-console.log(`[config] DB=${process.env.DATABASE_URL.replace(/:([^:@]+)@/, ':***@').slice(0, 60)}...`);
+console.log(`[config] DB=${maskedDb}...`);
 
 try {
   await runMigrations();
