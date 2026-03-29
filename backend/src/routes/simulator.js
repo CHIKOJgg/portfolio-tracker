@@ -1,11 +1,6 @@
 import sql from '../db.js';
+import { getDbUserId } from './_helpers.js';
 import { calcCashMetrics, calcBondMetrics, simulateTrade } from '../utils/twx.js';
-
-async function getDbUserId(telegramId) {
-  const [u] = await sql`SELECT id FROM users WHERE telegram_id = ${telegramId}`;
-  if (!u) throw Object.assign(new Error('User not found'), { statusCode: 404 });
-  return u.id;
-}
 
 export default async function simulatorRoutes(fastify) {
   fastify.post('/simulator/calculate', {
@@ -21,8 +16,9 @@ export default async function simulatorRoutes(fastify) {
         },
       },
     },
-  }, async (req) => {
-    const uid = await getDbUserId(req.telegramUser.id);
+  }, async (req, reply) => {
+    const uid = await getDbUserId(req, reply);
+    if (uid === null) return;
 
     const [cashTxs, bondTxs, bpRows] = await Promise.all([
       sql`SELECT * FROM transactions WHERE user_id=${uid} AND asset_type='cash_usd'`,
@@ -30,9 +26,9 @@ export default async function simulatorRoutes(fastify) {
       sql`SELECT * FROM bond_params WHERE user_id=${uid}`,
     ]);
 
-    const bondParams     = bpRows[0] || null;
-    const existingCash   = calcCashMetrics(cashTxs);
-    const existingBonds  = bondParams ? calcBondMetrics(bondTxs, bondParams) : null;
+    const bondParams    = bpRows[0] || null;
+    const existingCash  = calcCashMetrics(cashTxs);
+    const existingBonds = bondParams ? calcBondMetrics(bondTxs, bondParams) : null;
 
     const result = simulateTrade({
       existingCash, existingBonds, bondParams,
@@ -40,10 +36,8 @@ export default async function simulatorRoutes(fastify) {
                priceByn: req.body.price_byn, rateUsd: req.body.rate_usd },
     });
 
-    // Strip .raw from response
     if (result.cashMetrics) delete result.cashMetrics.raw;
     if (result.bondMetrics) delete result.bondMetrics.raw;
-
     return result;
   });
 }

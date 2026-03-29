@@ -1,15 +1,11 @@
 import sql from '../db.js';
+import { getDbUserId } from './_helpers.js';
 import { calcCashMetrics, calcBondMetrics, calcPortfolioMetrics } from '../utils/twx.js';
 
-async function getDbUserId(telegramId) {
-  const [u] = await sql`SELECT id FROM users WHERE telegram_id = ${telegramId}`;
-  if (!u) throw Object.assign(new Error('User not found'), { statusCode: 404 });
-  return u.id;
-}
-
 export default async function portfolioRoutes(fastify) {
-  fastify.get('/portfolio/summary', async (req) => {
-    const uid = await getDbUserId(req.telegramUser.id);
+  fastify.get('/portfolio/summary', async (req, reply) => {
+    const uid = await getDbUserId(req, reply);
+    if (uid === null) return;
 
     const [cashTxs, bondTxs, bpRows, rateRows] = await Promise.all([
       sql`SELECT * FROM transactions WHERE user_id=${uid} AND asset_type='cash_usd' ORDER BY date`,
@@ -18,7 +14,6 @@ export default async function portfolioRoutes(fastify) {
       sql`SELECT rate FROM rate_cache WHERE currency='USD'`,
     ]);
 
-    // FIX: handle null bondParams gracefully
     const bondParams  = bpRows[0] || null;
     const currentRate = rateRows[0] ? Number(rateRows[0].rate) : null;
 
@@ -33,18 +28,8 @@ export default async function portfolioRoutes(fastify) {
       pnlPct          = portfolio.totalByn > 0 ? (pnlByn / portfolio.totalByn) * 100 : 0;
     }
 
-    // Strip .raw from response (internal only)
     const stripRaw = (m) => m ? { ...m, raw: undefined } : null;
-
-    return {
-      portfolio,
-      cash:           stripRaw(cashMetrics),
-      bonds:          stripRaw(bondMetrics),
-      bondParams,
-      currentRate,
-      currentValueByn,
-      pnlByn,
-      pnlPct,
-    };
+    return { portfolio, cash: stripRaw(cashMetrics), bonds: stripRaw(bondMetrics),
+             bondParams, currentRate, currentValueByn, pnlByn, pnlPct };
   });
 }

@@ -1,7 +1,7 @@
 import sql from '../db.js';
 
 const NBRB_URL  = 'https://api.nbrb.by/exrates/rates/USD?parammode=2';
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+const CACHE_TTL = 60 * 60 * 1000;
 
 async function fetchNBRB() {
   const res = await fetch(NBRB_URL, { signal: AbortSignal.timeout(6000) });
@@ -19,11 +19,9 @@ async function saveRate(rate) {
 }
 
 export default async function ratesRoutes(fastify) {
-  // Public — both endpoints require the user to be authed via preHandler
   fastify.get('/rates/current', async (_req, reply) => {
     const [cached] = await sql`SELECT rate, fetched_at FROM rate_cache WHERE currency='USD'`;
     const isFresh  = cached && (Date.now() - new Date(cached.fetched_at).getTime()) < CACHE_TTL;
-
     if (isFresh) return { rate: Number(cached.rate), source: 'cache' };
 
     try {
@@ -36,12 +34,10 @@ export default async function ratesRoutes(fastify) {
     }
   });
 
-  // FIX: manual rate — now protected by global auth middleware
   fastify.post('/rates/manual', {
     schema: {
       body: {
-        type: 'object',
-        required: ['rate'],
+        type: 'object', required: ['rate'],
         properties: { rate: { type: 'number', minimum: 0.5, maximum: 50 } },
       },
     },

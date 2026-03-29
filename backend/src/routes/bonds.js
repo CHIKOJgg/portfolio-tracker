@@ -1,10 +1,5 @@
 import sql from '../db.js';
-
-async function getDbUserId(telegramId) {
-  const [u] = await sql`SELECT id FROM users WHERE telegram_id = ${telegramId}`;
-  if (!u) throw Object.assign(new Error('User not found'), { statusCode: 404 });
-  return u.id;
-}
+import { getDbUserId } from './_helpers.js';
 
 async function ensureParams(uid) {
   await sql`INSERT INTO bond_params (user_id) VALUES (${uid}) ON CONFLICT DO NOTHING`;
@@ -13,8 +8,9 @@ async function ensureParams(uid) {
 }
 
 export default async function bondsRoutes(fastify) {
-  fastify.get('/bond-params', async (req) => {
-    const uid = await getDbUserId(req.telegramUser.id);
+  fastify.get('/bond-params', async (req, reply) => {
+    const uid = await getDbUserId(req, reply);
+    if (uid === null) return;
     return ensureParams(uid);
   });
 
@@ -36,12 +32,13 @@ export default async function bondsRoutes(fastify) {
         },
       },
     },
-  }, async (req) => {
-    const uid = await getDbUserId(req.telegramUser.id);
+  }, async (req, reply) => {
+    const uid = await getDbUserId(req, reply);
+    if (uid === null) return;
+
     const cur = await ensureParams(uid);
     const b   = req.body;
 
-    // FIX: merge with current values — only update what was sent
     const [updated] = await sql`
       UPDATE bond_params SET
         nominal_byn       = ${b.nominal_byn       ?? cur.nominal_byn},

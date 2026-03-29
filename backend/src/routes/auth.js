@@ -1,39 +1,63 @@
-import sql from '../db.js';
-import { validateTelegramData } from '../middleware/auth.js';
+import crypto from 'crypto';
 
 const DEV_USER = { id: 99999999, first_name: 'Developer', username: 'devmode' };
+const AUTH_MAX_AGE_SEC = 86400;
 
-async function upsertUser(tgUser) {
-  const [user] = await sql`
-    INSERT INTO users (telegram_id, username, first_name)
-    VALUES (${tgUser.id}, ${tgUser.username || null}, ${tgUser.first_name || null})
-    ON CONFLICT (telegram_id) DO UPDATE SET
-      username   = EXCLUDED.username,
-      first_name = EXCLUDED.first_name
-    RETURNING id
-  `;
-  await sql`
-    INSERT INTO bond_params (user_id) VALUES (${user.id})
-    ON CONFLICT (user_id) DO NOTHING
-  `;
-  return user;
+export function validateTelegramData(initData, botToken) {
+  try {
+    if (!initData || !botToken) return null;
+    const params = new URLSearchParams(initData);
+    const hash   = params.get('hash');
+    if (!hash) return null;
+
+    const authDate = parseInt(params.get('auth_date') || '0', 10);
+    if (!authDate || Date.now() / 1000 - authDate > AUTH_MAX_AGE_SEC) return null;
+
+    params.delete('hash');
+    const dataCheckStr = [...params.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n');
+
+    const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+    const expected  = crypto.createHmac('sha256', secretKey).update(dataCheckStr).digest('hex');
+
+    if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(hash))) return null;
+
+    const userStr = params.get('user');
+    return userStr ? JSON.parse(userStr) : null;
+  } catch { return null; }
 }
 
-export default async function authRoutes(fastify) {
-  fastify.post('/auth/validate', async (req, reply) => {
-    const { initData = '' } = req.body || {};
-    const isDev    = process.env.DEV_MODE === 'true';
-    const botToken = process.env.BOT_TOKEN;
+export async function authMiddleware(fastify) {
+  fastify.decorateRequest('telegramUser', null);
 
-    let tgUser;
-    if (isDev || !botToken) {
-      tgUser = DEV_USER;
-    } else {
-      tgUser = validateTelegramData(initData, botToken);
-      if (!tgUser) return reply.status(401).send({ error: 'Invalid Telegram auth' });
+  fastify.addHook('preHandler', async (req, reply) => {
+    // Public routes — no auth needed
+    if (req.url === '/health' || req.url.startsWith('/auth')) return;
+
+    const isDev = process.env.DEV_MODE === 'true';
+    if (isDev) {
+      req.telegramUser = DEV_USER;
+      return;
     }
 
-    await upsertUser(tgUser);
-    return { ok: true, user: { id: tgUser.id, first_name: tgUser.first_name } };
+    const initData = req.headers['x-telegram-init-data'];
+    if (!initData) {
+      return reply.status(401).send({ error: 'Unauthorized: missing Telegram auth header' });
+    }
+
+    const botToken = process.env.BOT_TOKEN;
+    if (!botToken) {
+      // No bot token configured — reject with clear error
+      return reply.status(500).send({ error: 'Server misconfiguration: BOT_TOKEN not set' });
+    }
+
+    const user = validateTelegramData(initData, botToken);
+    if (!user) {
+      return reply.status(401).send({ error: 'Unauthorized: invalid or expired Telegram auth' });
+    }
+
+    req.telegramUser = user;
   });
 }
