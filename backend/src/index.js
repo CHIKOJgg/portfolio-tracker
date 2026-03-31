@@ -75,10 +75,23 @@ const allowedOrigins = (process.env.CORS_ORIGINS || '')
 await fastify.register(cors, {
   origin: isDev || allowedOrigins.length === 0
     ? true
-    : (origin, cb) =>
-        (!origin || allowedOrigins.includes(origin))
-          ? cb(null, true)
-          : cb(new Error('CORS: not allowed'), false),
+    : (origin, cb) => {
+        if (!origin) return cb(null, true);
+
+        const normalized = origin.replace(/\/$/, '');
+
+        const isAllowed = allowedOrigins.some(o =>
+          normalized === o ||
+          normalized.startsWith(o) // для поддоменов / preview
+        );
+
+        if (isAllowed) {
+          cb(null, true);
+        } else {
+          console.log('❌ CORS blocked:', origin);
+          cb(new Error('CORS: not allowed'), false);
+        }
+      },
   credentials: true,
 });
 
