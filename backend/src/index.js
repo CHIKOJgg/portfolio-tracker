@@ -80,10 +80,15 @@ await fastify.register(cors, {
 
         const normalized = origin.replace(/\/$/, '');
 
-        const isAllowed = allowedOrigins.some(o =>
-          normalized === o ||
-          normalized.startsWith(o) // для поддоменов / preview
-        );
+        const isAllowed = allowedOrigins.some(o => {
+          const allowed = o.replace(/\/$/, '');
+
+          return (
+            normalized === allowed ||
+            normalized.endsWith('.pages.dev') ||
+            normalized.includes('telegram')
+          );
+        });
 
         if (isAllowed) {
           cb(null, true);
