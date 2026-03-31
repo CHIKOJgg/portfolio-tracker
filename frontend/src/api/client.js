@@ -1,6 +1,6 @@
 const BASE = import.meta.env.VITE_API_URL || '/api';
 let _initData = '';
-
+console.log('BASE:', BASE);
 export const setInitData = (d) => {
   _initData = d || '';
   // Debug log in dev
