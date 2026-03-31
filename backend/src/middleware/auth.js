@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 
 const DEV_USER = { id: 99999999, first_name: 'Developer', username: 'devmode' };
-const AUTH_MAX_AGE_SEC = 86400; // 24h
+const AUTH_MAX_AGE_SEC = 86400;
 
 export function validateTelegramData(initData, botToken) {
   try {
@@ -10,7 +10,6 @@ export function validateTelegramData(initData, botToken) {
     const hash   = params.get('hash');
     if (!hash) return null;
 
-    // FIX: check auth_date freshness
     const authDate = parseInt(params.get('auth_date') || '0', 10);
     if (!authDate || Date.now() / 1000 - authDate > AUTH_MAX_AGE_SEC) return null;
 
@@ -34,18 +33,30 @@ export async function authMiddleware(fastify) {
   fastify.decorateRequest('telegramUser', null);
 
   fastify.addHook('preHandler', async (req, reply) => {
+    // Public routes — no auth needed
     if (req.url === '/health' || req.url.startsWith('/auth')) return;
 
-    if (process.env.DEV_MODE === 'true') {
+    const isDev = process.env.DEV_MODE === 'true';
+    if (isDev) {
       req.telegramUser = DEV_USER;
       return;
     }
 
     const initData = req.headers['x-telegram-init-data'];
-    if (!initData) return reply.status(401).send({ error: 'Unauthorized' });
+    if (!initData) {
+      return reply.status(401).send({ error: 'Unauthorized: missing Telegram auth header' });
+    }
 
-    const user = validateTelegramData(initData, process.env.BOT_TOKEN);
-    if (!user) return reply.status(401).send({ error: 'Invalid or expired auth data' });
+    const botToken = process.env.BOT_TOKEN;
+    if (!botToken) {
+      // No bot token configured — reject with clear error
+      return reply.status(500).send({ error: 'Server misconfiguration: BOT_TOKEN not set' });
+    }
+
+    const user = validateTelegramData(initData, botToken);
+    if (!user) {
+      return reply.status(401).send({ error: 'Unauthorized: invalid or expired Telegram auth' });
+    }
 
     req.telegramUser = user;
   });
